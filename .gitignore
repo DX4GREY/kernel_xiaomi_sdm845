@@ -128,3 +128,7 @@ Android.bp
 # JSON compilation database for LSP
 #
 compile_commands.json
+
+# Additional rules
+out
+kali-nethunter-kernel-builder
