@@ -2,6 +2,7 @@
 
 # Default: debug disabled
 DEBUG=0
+HLOC=linux-headers
 
 # Check for --debug flag
 for arg in "$@"; do
@@ -20,49 +21,48 @@ log() {
 # Target architectures
 ARCHES=(arm64 arm)
 
-log "Creating headers directory structure..."
-mkdir -p headers/arch
+log "Creating $HLOC directory structure..."
+mkdir -p $HLOC/arch
 
 log "Copying include/ directory..."
-cp -r include headers/
+cp -r include $HLOC/
 
 log "Copying scripts/ directory..."
-cp -r scripts headers/
+cp -r scripts $HLOC/
 
 log "Copying Makefile..."
-cp Makefile headers/
+cp Makefile $HLOC/
 
 log "Handling Module.symvers..."
 if [ -e Module.symvers ]; then
     log "Found Module.symvers, copying..."
-    cp Module.symvers headers/
+    cp Module.symvers $HLOC/
 else
     log "Module.symvers not found, creating empty one..."
-    touch headers/Module.symvers
+    touch $HLOC/Module.symvers
 fi
 
-log "Entering headers/ directory..."
-cd headers || { echo "[ERROR] Failed to enter headers/"; exit 1; }
+log "Entering $HLOC/ directory..."
+cd $HLOC || { echo "[ERROR] Failed to enter $HLOC/"; exit 1; }
 
 for arch in "${ARCHES[@]}"; do
     log "Copying arch/$arch..."
     cp -r ../arch/$arch arch/
 done
 
-log "Cleaning up .o and .c files..."
-find . -type f -name "*.o" -print -delete
-find . -type f -name "*.c" -print -delete
+log "Cleaning up files..."
+find . -type f -name "*.c" -delete
 
 cd ..
 
 if [ -d out ]; then
     log "Found out/ directory, copying additional include/ and scripts/..."
-    cp -r out/include headers/
-    cp -r out/scripts headers/
+    cp -r out/include $HLOC/
+    cp -r out/scripts $HLOC/
 
     for arch in "${ARCHES[@]}"; do
         log "Copying out/arch/$arch..."
-        cp -r out/arch/$arch headers/arch/
+        cp -r out/arch/$arch $HLOC/arch/
     done
 else
     log "No out/ directory found. Skipping."
