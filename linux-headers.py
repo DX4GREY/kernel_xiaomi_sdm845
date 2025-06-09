@@ -5,7 +5,7 @@ import shutil
 import argparse
 from pathlib import Path
 
-patterns = ["*.o", "*.cmd", "*.d", ".*.cmd"]
+patterns = ["*.c", "*.o", "*.cmd", "*.d", ".*.cmd"]
 
 def log(msg, debug):
 	if debug:
