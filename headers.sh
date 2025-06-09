@@ -48,6 +48,12 @@ cd $HLOC || { echo "[ERROR] Failed to enter $HLOC/"; exit 1; }
 for arch in "${ARCHES[@]}"; do
     log "Copying arch/$arch..."
     cp -r ../arch/$arch arch/
+    if [ "$arch" == "arm64" ]; then 
+    	log "Symlink $arch..."
+    	cd arch
+    	ln -s $arch aarch64
+    	cd ..
+    fi
 done
 
 log "Cleaning up files..."
