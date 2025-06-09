@@ -62,11 +62,11 @@ def setup_headers(debug, outk):
 	(HLOC / "arch").mkdir(parents=True, exist_ok=True)
 
 	# Copy essential files
-	log("Copying include", debug)
+	log("Copying include...", debug)
 	safe_copy("include", HLOC / "include", debug)
-	log("Copying scripts", debug)
+	log("Copying scripts...", debug)
 	safe_copy("scripts", HLOC / "scripts", debug)
-	log("Copying Makefile", debug)
+	log("Copying Makefile...", debug)
 	safe_copy("Makefile", HLOC / "Makefile", debug)
 
 	# Handle Module.symvers
@@ -91,24 +91,24 @@ def setup_headers(debug, outk):
 			except FileExistsError:
 				pass
 
-	# Delete all .c files
-	log("Cleaning up junk files...", debug)
-	clean_headers(HLOC.resolve(), patterns, debug)
-
 	# Handle out directory
 	out_dir = Path("out")
 	if out_dir.exists():
 		log("Found out/ directory, copying additional includes and scripts...", debug)
-		log("Copying out include", debug)
+		log("Copying out include...", debug)
 		safe_copy(out_dir / "include", HLOC / "include", debug)
-		log("Copying out scripts", debug)
+		log("Copying out scripts...", debug)
 		safe_copy(out_dir / "scripts", HLOC / "scripts", debug)
 		for arch in ARCHES:
-			log(f"Copying out {arch}", debug)
+			log(f"Copying out {arch}...", debug)
 			safe_copy(out_dir / "arch" / arch, HLOC / "arch" / arch, debug)
 	else:
 		log("No out/ directory found. Skipping.", debug)
-
+	
+	# Delete all .c files
+	log("Cleaning up junk files...", debug)
+	clean_headers(HLOC.resolve(), patterns, debug)
+	
 	log("All done!", debug)
 
 def main():
