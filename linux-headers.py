@@ -5,9 +5,19 @@ import shutil
 import argparse
 from pathlib import Path
 
+patterns = ["*.o", "*.cmd", "*.d", ".*.cmd"]
+
 def log(msg, debug):
 	if debug:
 		print(f"[DEBUG] {msg}")
+
+def clean_headers(path, patterns, debug):
+	for pattern in patterns:
+		for file in path.rglob(pattern):
+			try:
+				file.unlink()
+			except Exception as e:
+				log(f"Error delete {file}: {e}", debug)
 
 def is_kernel_prepared(outputd=""):
 	must_exist = [
@@ -80,9 +90,8 @@ def setup_headers(debug, outk):
 				pass
 
 	# Delete all .c files
-	log("Cleaning up *.c files...", debug)
-	for cfile in HLOC.rglob("*.c"):
-		cfile.unlink()
+	log("Cleaning up junk files...", debug)
+	clean_headers(HLOC.resolve(), patterns, debug)
 
 	# Handle out directory
 	out_dir = Path("out")
