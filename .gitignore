@@ -130,6 +130,6 @@ Android.bp
 compile_commands.json
 
 # Additional rules
-out
-kali-nethunter-kernel-builder
-linux-headers
+out/
+kali-nethunter-kernel-builder/
+linux-headers/
