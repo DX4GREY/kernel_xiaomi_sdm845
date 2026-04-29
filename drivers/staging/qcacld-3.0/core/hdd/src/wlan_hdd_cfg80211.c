@@ -29,6 +29,8 @@
 #include <linux/init.h>
 #include <linux/etherdevice.h>
 #include <linux/wireless.h>
+#include <linux/cred.h>
+#include <linux/uidgid.h>
 #include <wlan_hdd_includes.h>
 #include <net/arp.h>
 #include <net/cfg80211.h>
@@ -114,6 +116,9 @@
 #include "wlan_hdd_hw_capability.h"
 #include "wlan_hdd_bcn_recv.h"
 #include "wlan_hdd_oemdata.h"
+#ifdef FEATURE_FRAME_INJECTION_SUPPORT
+#include "wlan_hdd_frame_inject.h"
+#endif
 
 #define g_mode_rates_size (12)
 #define a_mode_rates_size (8)
@@ -16604,6 +16609,9 @@ const struct wiphy_vendor_command hdd_wiphy_vendor_commands[] = {
 		.doit = wlan_hdd_cfg80211_get_sar_power_limits
 	},
 
+#ifdef FEATURE_FRAME_INJECTION_SUPPORT
+	FEATURE_FRAME_INJECTION_VENDOR_COMMANDS,
+#endif
 	BCN_RECV_FEATURE_VENDOR_COMMANDS
 
 	{
@@ -18057,6 +18065,23 @@ static int __wlan_hdd_cfg80211_change_iface(struct wiphy *wiphy,
 	hdd_debug("Device_mode = %d, IFTYPE = 0x%x",
 	       adapter->device_mode, type);
 
+	if (adapter->device_mode == QDF_MONITOR_MODE &&
+	    type == NL80211_IFTYPE_MONITOR) {
+		ndev->ieee80211_ptr->iftype = type;
+		hdd_exit();
+		return 0;
+	}
+
+	if ((adapter->device_mode == QDF_MONITOR_MODE ||
+	     hdd_get_conparam() == QDF_GLOBAL_MONITOR_MODE) &&
+	    type != NL80211_IFTYPE_MONITOR &&
+	    !uid_eq(current_euid(), GLOBAL_ROOT_UID)) {
+		hdd_warn_rl("rejecting monitor iface change from %s",
+			    current->comm);
+		hdd_exit();
+		return -EOPNOTSUPP;
+	}
+
 	status = hdd_trigger_psoc_idle_restart(hdd_ctx);
 	if (status) {
 		hdd_err("Failed to start modules");
@@ -18136,7 +18161,7 @@ static int __wlan_hdd_cfg80211_change_iface(struct wiphy *wiphy,
 				 * a randomized MAC address of the
 				 * form 02:1A:11:Fx:xx:xx
 				 */
-				get_random_bytes(&ndev->dev_addr[3], 3);
+				get_random_bytes((void *)&ndev->dev_addr[3], 3);
 				ndev->dev_addr[0] = 0x02;
 				ndev->dev_addr[1] = 0x1A;
 				ndev->dev_addr[2] = 0x11;
@@ -21550,8 +21575,11 @@ static int __wlan_hdd_cfg80211_connect(struct wiphy *wiphy,
 	}
 
 	status = wlan_hdd_validate_context(hdd_ctx);
-	if (0 != status)
+	if (0 != status) {
+		hdd_err("cfg80211_connect reject: validate_context status %d",
+			status);
 		return status;
+	}
 
 	if (req->bssid)
 		bssid = req->bssid;
@@ -24284,6 +24312,73 @@ int wlan_hdd_change_hw_mode_for_given_chnl(struct hdd_adapter *adapter,
 
 #ifdef FEATURE_MONITOR_MODE_SUPPORT
 /**
+ * wlan_hdd_cfg80211_get_channel() - Report current operating channel
+ * @wiphy: wiphy handle
+ * @wdev: wireless_dev handle
+ * @chandef: output channel definition
+ *
+ * Required by nl80211 (NL80211_CMD_GET_INTERFACE) and wext (SIOCGIWFREQ)
+ * so that tools like aireplay-ng / mdk3 can determine the current channel.
+ *
+ * Return: 0 on success, -ENODATA if no channel is set.
+ */
+static int wlan_hdd_cfg80211_get_channel(struct wiphy *wiphy,
+					 struct wireless_dev *wdev,
+					 struct cfg80211_chan_def *chandef)
+{
+	struct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(wdev->netdev);
+	struct hdd_station_ctx *sta_ctx;
+	struct ieee80211_channel *chan;
+	uint32_t freq;
+
+	if (!adapter)
+		return -ENODATA;
+
+	/* Primary source: adapter->mon_chan_freq (set by both boot-time
+	 * monitor mode and cfg80211 set_monitor_channel).
+	 */
+	freq = adapter->mon_chan_freq;
+
+	if (!freq && adapter->mon_chan)
+		freq = cds_chan_to_freq(adapter->mon_chan);
+
+	/* Fallback: station context ch_info (set by hdd_mon_select_cbmode
+	 * in the roam callback path).
+	 */
+	if (!freq) {
+		sta_ctx = WLAN_HDD_GET_STATION_CTX_PTR(adapter);
+		if (sta_ctx && sta_ctx->ch_info.channel)
+			freq = cds_chan_to_freq(sta_ctx->ch_info.channel);
+	}
+
+	if (!freq)
+		return -ENODATA;
+
+	chan = ieee80211_get_channel(wiphy, freq);
+	if (!chan)
+		return -ENODATA;
+
+	cfg80211_chandef_create(chandef, chan, NL80211_CHAN_NO_HT);
+
+	/* Upgrade width if we know the bandwidth */
+	switch (adapter->mon_bandwidth) {
+	case CH_WIDTH_40MHZ:
+		chandef->width = NL80211_CHAN_WIDTH_40;
+		break;
+	case CH_WIDTH_80MHZ:
+		chandef->width = NL80211_CHAN_WIDTH_80;
+		break;
+	case CH_WIDTH_160MHZ:
+		chandef->width = NL80211_CHAN_WIDTH_160;
+		break;
+	default:
+		break;
+	}
+
+	return 0;
+}
+
+/**
  * wlan_hdd_cfg80211_set_mon_ch() - Set monitor mode capture channel
  * @wiphy: Handle to struct wiphy to get handle to module context.
  * @chandef: Contains information about the capture channel to be set.
@@ -24367,6 +24462,10 @@ static int __wlan_hdd_cfg80211_set_mon_ch(struct wiphy *wiphy,
 		ret = qdf_status_to_os_return(status);
 		return ret;
 	}
+
+	adapter->mon_chan_freq = chandef->chan->center_freq;
+	adapter->mon_bandwidth = ch_width;
+
 	hdd_exit();
 
 	return 0;
@@ -25172,6 +25271,7 @@ static struct cfg80211_ops wlan_hdd_cfg80211_ops = {
 #endif
 #ifdef FEATURE_MONITOR_MODE_SUPPORT
 	.set_monitor_channel = wlan_hdd_cfg80211_set_mon_ch,
+	.get_channel = wlan_hdd_cfg80211_get_channel,
 #endif
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 5, 0)) || \
 	defined(CFG80211_ABORT_SCAN)

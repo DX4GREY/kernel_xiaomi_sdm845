@@ -24,6 +24,9 @@
 #include <cds_sched.h>
 #include <cds_utils.h>
 #include "wlan_hdd_rx_monitor.h"
+#ifdef FEATURE_FRAME_INJECTION_SUPPORT
+#include "wlan_hdd_frame_inject.h"
+#endif
 
 /**
  * hdd_rx_monitor_callback(): Callback function for receive monitor mode
@@ -122,10 +125,49 @@ int hdd_enable_monitor_mode(struct net_device *dev)
 	void *soc = cds_get_context(QDF_MODULE_ID_SOC);
 	void *pdev = cds_get_context(QDF_MODULE_ID_TXRX);
 	struct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(dev);
+	struct cdp_vdev *vdev;
+	int ret;
 
 	hdd_enter_dev(dev);
 
-	return cdp_set_monitor_mode(soc,
-			(struct cdp_vdev *)cdp_get_vdev_from_vdev_id(soc,
-			(struct cdp_pdev *)pdev, adapter->session_id), false);
+	vdev = (struct cdp_vdev *)cdp_get_vdev_from_vdev_id(soc,
+			(struct cdp_pdev *)pdev, adapter->session_id);
+	ret = cdp_set_monitor_mode(soc, vdev, false);
+
+#ifdef FEATURE_FRAME_INJECTION_SUPPORT
+	if (!ret && adapter &&
+	    QDF_IS_STATUS_ERROR(hdd_frame_inject_enable(adapter)))
+		hdd_warn("Failed to enable frame injection");
+#endif
+
+	return ret;
+}
+
+/**
+ * hdd_disable_monitor_mode() - Disable monitor mode
+ * @dev: Pointer to the net_device structure
+ *
+ * Return: 0 for success; non-zero for failure
+ */
+int hdd_disable_monitor_mode(struct net_device *dev)
+{
+	void *soc = cds_get_context(QDF_MODULE_ID_SOC);
+	void *pdev = cds_get_context(QDF_MODULE_ID_TXRX);
+	struct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(dev);
+	struct cdp_vdev *vdev;
+	int ret;
+
+	hdd_enter_dev(dev);
+
+#ifdef FEATURE_FRAME_INJECTION_SUPPORT
+	if (adapter &&
+	    QDF_IS_STATUS_ERROR(hdd_frame_inject_disable(adapter)))
+		hdd_warn("Failed to disable frame injection");
+#endif
+
+	vdev = (struct cdp_vdev *)cdp_get_vdev_from_vdev_id(soc,
+			(struct cdp_pdev *)pdev, adapter->session_id);
+	ret = cdp_set_monitor_mode(soc, vdev, true);
+
+	return ret;
 }

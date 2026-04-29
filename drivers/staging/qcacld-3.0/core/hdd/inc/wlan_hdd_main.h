@@ -92,6 +92,9 @@
 #include "wlan_hdd_oemdata.h"
 #endif
 #include "wlan_hdd_he.h"
+#ifdef FEATURE_FRAME_INJECTION_SUPPORT
+#include "wlan_hdd_frame_inject.h"
+#endif
 
 #include <net/neighbour.h>
 #include <net/netevent.h>
@@ -1520,6 +1523,7 @@ struct hdd_adapter {
 	uint32_t track_dest_port;
 	uint32_t track_dest_ipv4;
 	uint32_t mon_chan;
+	uint32_t mon_chan_freq;
 	uint32_t mon_bandwidth;
 
 	/* rcpi information */
@@ -1546,6 +1550,9 @@ struct hdd_adapter {
 	bool oem_data_in_progress;
 	void *cookie;
 	bool response_expected;
+#endif
+#ifdef FEATURE_FRAME_INJECTION_SUPPORT
+	struct hdd_injection_ctx *injection_ctx;
 #endif
 };
 

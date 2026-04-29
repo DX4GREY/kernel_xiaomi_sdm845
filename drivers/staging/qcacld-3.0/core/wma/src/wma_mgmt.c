@@ -75,6 +75,7 @@
 #include <wlan_mlme_main.h>
 #include "wlan_pkt_capture_ucfg_api.h"
 #include <wlan_logging_sock_svc.h>
+#include "wma_frame_inject.h"
 
 /**
  * wma_send_bcn_buf_ll() - prepare and send beacon buffer to fw for LL
@@ -3205,6 +3206,26 @@ static int wma_process_mgmt_tx_completion(tp_wma_handle wma_handle,
 	wma_debug("status: %s wmi_desc_id: %d",
 		  wma_get_status_str(status), desc_id);
 
+	if (desc_id == 0 || WMA_IS_INJECTION_DESC_ID(desc_id)) {
+		uint32_t norm_status = status;
+
+		if (status >= WMI_MGMT_TX_COMP_TYPE_MAX) {
+			static bool inj_ext_status_logged;
+
+			norm_status = status & 0x3;
+			if (!inj_ext_status_logged) {
+				wma_info("Injection: FW extended status 0x%x normalised to %u (%s)",
+					 status, norm_status,
+					 wma_get_status_str(norm_status));
+				inj_ext_status_logged = true;
+			}
+		}
+
+		wma_handle_injection_fw_response(wma_handle, desc_id,
+						 norm_status);
+		return 0;
+	}
+
 	pdev = wma_handle->pdev;
 	if (pdev == NULL) {
 		WMA_LOGE("%s: psoc ptr is NULL", __func__);
@@ -3212,11 +3233,15 @@ static int wma_process_mgmt_tx_completion(tp_wma_handle wma_handle,
 	}
 
 	buf = mgmt_txrx_get_nbuf(pdev, desc_id);
+	if (!buf) {
+		WMA_LOGE("%s: no mgmt desc for id %u status %u", __func__,
+			 desc_id, status);
+		return -EINVAL;
+	}
+
 	vdev_id = mgmt_txrx_get_vdev_id(pdev, desc_id);
 
-	if (buf)
-		qdf_nbuf_unmap_single(wma_handle->qdf_dev, buf,
-					  QDF_DMA_TO_DEVICE);
+	qdf_nbuf_unmap_single(wma_handle->qdf_dev, buf, QDF_DMA_TO_DEVICE);
 
 	packetdump_cb = wma_handle->wma_mgmt_tx_packetdump_cb;
 	if (packetdump_cb) {

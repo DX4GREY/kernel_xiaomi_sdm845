@@ -93,6 +93,7 @@
 #include "wma_coex.h"
 #include <ftm_time_sync_ucfg_api.h>
 #include "wlan_pkt_capture_ucfg_api.h"
+#include "wma_frame_inject.h"
 
 #define WMA_LOG_COMPLETION_TIMER 3000 /* 3 seconds */
 #define WMI_TLV_HEADROOM 128
@@ -3824,6 +3825,12 @@ QDF_STATUS wma_open(struct wlan_objmgr_psoc *psoc,
 
 	wma_register_apf_events(wma_handle);
 	wma_register_mws_coex_events(wma_handle);
+
+	qdf_status = wma_init_injection_queue(wma_handle);
+	if (qdf_status != QDF_STATUS_SUCCESS)
+		WMA_LOGE("%s: Failed to initialize injection queue: %d",
+			 __func__, qdf_status);
+
 	return QDF_STATUS_SUCCESS;
 
 err_dbglog_init:
@@ -4928,6 +4935,13 @@ QDF_STATUS wma_close(void)
 	pmo_unregister_is_device_in_low_pwr_mode(wma_handle->psoc);
 	pmo_unregister_get_pause_bitmap(wma_handle->psoc);
 	pmo_unregister_pause_bitmap_notifier(wma_handle->psoc);
+
+	/* Deinitialize frame injection queue */
+	qdf_status = wma_deinit_injection_queue(wma_handle);
+	if (qdf_status != QDF_STATUS_SUCCESS) {
+		WMA_LOGE("%s: Failed to deinitialize injection queue: %d",
+			 __func__, qdf_status);
+	}
 
 	tgt_psoc_info = wlan_psoc_get_tgt_if_handle(wma_handle->psoc);
 	init_deinit_free_num_units(wma_handle->psoc, tgt_psoc_info);
