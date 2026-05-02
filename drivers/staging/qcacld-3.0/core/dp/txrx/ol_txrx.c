@@ -1542,6 +1542,12 @@ ol_txrx_pdev_attach(ol_txrx_soc_handle soc, struct cdp_cfg *ctrl_pdev,
 	if (!pdev)
 		goto fail0;
 
+	/*
+	 * Keep the default deterministic before the WMI service bitmap is
+	 * available. Flow-control setup depends on it for legacy mgmt pools.
+	 */
+	pdev->is_mgmt_over_wmi_enabled = 0;
+
 	/* init LL/HL cfg here */
 	pdev->cfg.is_high_latency = ol_cfg_is_high_latency(ctrl_pdev);
 	pdev->cfg.default_tx_comp_req = !ol_cfg_tx_free_at_download(ctrl_pdev);
