@@ -111,12 +111,61 @@ def setup_headers(debug, outk):
 	
 	log("All done!", debug)
 
+def build_deb(debug, version="1.0", arch="arm64"):
+	# Checking dpkg-deb availability
+    if shutil.which("dpkg-deb") is None:
+        print("[ERROR] dpkg-deb is not available. Please install it to build the DEB package.")
+        return
+
+    # Paths
+    HLOC = Path("linux-headers")
+    DEB_ROOT = Path("deb_pkg")
+    DEBIAN = DEB_ROOT / "DEBIAN"
+    INSTALL_PATH = DEB_ROOT / f"usr/src/linux-headers-{version}"
+
+    log("Setting up DEB structure...", debug)
+
+    # Clean previous build
+    if DEB_ROOT.exists():
+        shutil.rmtree(DEB_ROOT)
+
+    DEBIAN.mkdir(parents=True, exist_ok=True)
+    INSTALL_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    # Copy headers
+    log("Copying headers into package...", debug)
+    shutil.copytree(HLOC, INSTALL_PATH)
+
+    # Create control file
+    control_content = f"""Package: linux-headers-custom
+Version: {version}
+Section: kernel
+Priority: optional
+Architecture: {arch}
+Maintainer: You <you@example.com>
+Description: Minimal Linux kernel headers for external module building
+"""
+
+    (DEBIAN / "control").write_text(control_content)
+
+    # Build deb
+    deb_name = f"linux-headers-{version}_{arch}.deb"
+    log(f"Building {deb_name}...", debug)
+    os.system(f"dpkg-deb --build {DEB_ROOT} {deb_name}")
+
+    print(f"[INFO] DEB package created: {deb_name}")
+
 def main():
 	parser = argparse.ArgumentParser(description="Prepare minimal kernel headers for external module building.")
 	parser.add_argument("--debug", action="store_true", help="Enable debug logging")
 	parser.add_argument("--outk", type=Path, default="out", help="Kernel out directory (default: out)")
+	parser.add_argument("--build-deb", action="store_true", help="Build a DEB package after preparing headers")
+	parser.add_argument("--version", type=str, default="1.0", help="Version for the DEB package (default: 1.0)")
+	parser.add_argument("--arch", type=str, default="arm64", help="Target architecture for the DEB package (default: arm64)")
 	args = parser.parse_args()
 	setup_headers(args.debug, args.outk)
+	if args.build_deb:
+		build_deb(args.debug, args.version, args.arch)
 
 if __name__ == "__main__":
 	main()
