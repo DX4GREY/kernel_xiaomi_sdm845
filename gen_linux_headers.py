@@ -108,8 +108,6 @@ def setup_headers(debug, outk):
 	# Delete all .c files
 	log("Cleaning up junk files...", debug)
 	clean_headers(HLOC.resolve(), patterns, debug)
-	
-	log("All done!", debug)
 
 def get_kernel_version(outk, debug):
     makefile = Path("Makefile")
@@ -146,31 +144,26 @@ def get_kernel_version(outk, debug):
 
 def build_deb(debug, outk, arch="arm64"):
     version = get_kernel_version(outk, debug)
-	# Checking dpkg-deb availability
     if shutil.which("dpkg-deb") is None:
         print("[ERROR] dpkg-deb is not available. Please install it to build the DEB package.")
         return
 
-    # Paths
     HLOC = Path("linux-headers")
     DEB_ROOT = Path("deb_pkg")
     DEBIAN = DEB_ROOT / "DEBIAN"
     INSTALL_PATH = DEB_ROOT / f"usr/src/linux-headers-{version}"
 
     log("Setting up DEB structure...", debug)
-
-    # Clean previous build
     if DEB_ROOT.exists():
         shutil.rmtree(DEB_ROOT)
 
     DEBIAN.mkdir(parents=True, exist_ok=True)
     INSTALL_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-    # Copy headers
     log("Copying headers into package...", debug)
-    shutil.copytree(HLOC, INSTALL_PATH)
+    shutil.copytree(HLOC, INSTALL_PATH, symlinks=True)
 
-    # Create control file
+    # --- control file (tidak berubah) ---
     control_content = f"""Package: linux-headers-{version}
 Version: {version}
 Section: kernel
@@ -179,8 +172,17 @@ Architecture: {arch}
 Maintainer: You <dxablack@gmail.com>
 Description: Minimal Linux kernel headers for external module building
 """
-
     (DEBIAN / "control").write_text(control_content)
+
+    # +++ Tambahan: skrip postinst untuk membuat symlink /lib/modules +++
+    postinst_content = f"""#!/bin/sh
+set -e
+mkdir -p /lib/modules/{version}
+ln -sf /usr/src/linux-headers-{version} /lib/modules/{version}/build
+"""
+    postinst_path = DEBIAN / "postinst"
+    postinst_path.write_text(postinst_content)
+    postinst_path.chmod(0o755)   # harus executable
 
     # Build deb
     deb_name = f"linux-headers-{version}_{arch}.deb"
@@ -199,6 +201,7 @@ def main():
 	setup_headers(args.debug, args.outk)
 	if args.build_deb:
 		build_deb(args.debug, args.outk, args.arch)
+	log("All done!", args.debug)
 
 if __name__ == "__main__":
 	main()
