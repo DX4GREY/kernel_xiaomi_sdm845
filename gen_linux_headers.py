@@ -171,7 +171,7 @@ def build_deb(debug, outk, arch="arm64"):
     shutil.copytree(HLOC, INSTALL_PATH)
 
     # Create control file
-    control_content = f"""Package: linux-headers-custom
+    control_content = f"""Package: linux-headers-{version}
 Version: {version}
 Section: kernel
 Priority: optional
