@@ -134,3 +134,4 @@ out
 kali-nethunter-kernel-builder
 linux-headers/*
 deb_pkg/*
+linux-headers-*.deb

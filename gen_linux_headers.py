@@ -111,7 +111,41 @@ def setup_headers(debug, outk):
 	
 	log("All done!", debug)
 
-def build_deb(debug, version="1.0", arch="arm64"):
+def get_kernel_version(outk, debug):
+    makefile = Path("Makefile")
+    config = Path(outk) / ".config"
+
+    version = ""
+    patchlevel = ""
+    sublevel = ""
+    extraversion = ""
+    localversion = ""
+
+    # Parse Makefile
+    if makefile.exists():
+        for line in makefile.read_text().splitlines():
+            if line.startswith("VERSION ="):
+                version = line.split("=")[1].strip()
+            elif line.startswith("PATCHLEVEL ="):
+                patchlevel = line.split("=")[1].strip()
+            elif line.startswith("SUBLEVEL ="):
+                sublevel = line.split("=")[1].strip()
+            elif line.startswith("EXTRAVERSION ="):
+                extraversion = line.split("=")[1].strip()
+
+    # Parse .config
+    if config.exists():
+        for line in config.read_text().splitlines():
+            if line.startswith("CONFIG_LOCALVERSION="):
+                localversion = line.split("=")[1].strip().strip('"')
+
+    full_version = f"{version}.{patchlevel}.{sublevel}{extraversion}{localversion}"
+
+    log(f"Detected kernel version: {full_version}", debug)
+    return full_version
+
+def build_deb(debug, outk, arch="arm64"):
+    version = get_kernel_version(outk, debug)
 	# Checking dpkg-deb availability
     if shutil.which("dpkg-deb") is None:
         print("[ERROR] dpkg-deb is not available. Please install it to build the DEB package.")
@@ -142,7 +176,7 @@ Version: {version}
 Section: kernel
 Priority: optional
 Architecture: {arch}
-Maintainer: You <you@example.com>
+Maintainer: You <dxablack@gmail.com>
 Description: Minimal Linux kernel headers for external module building
 """
 
@@ -160,12 +194,11 @@ def main():
 	parser.add_argument("--debug", action="store_true", help="Enable debug logging")
 	parser.add_argument("--outk", type=Path, default="out", help="Kernel out directory (default: out)")
 	parser.add_argument("--build-deb", action="store_true", help="Build a DEB package after preparing headers")
-	parser.add_argument("--version", type=str, default="1.0", help="Version for the DEB package (default: 1.0)")
-	parser.add_argument("--arch", type=str, default="arm64", help="Target architecture for the DEB package (default: arm64)")
+	parser.add_argument("--arch", type=str, default="arm64", help="Target architecture")
 	args = parser.parse_args()
 	setup_headers(args.debug, args.outk)
 	if args.build_deb:
-		build_deb(args.debug, args.version, args.arch)
+		build_deb(args.debug, args.outk, args.arch)
 
 if __name__ == "__main__":
 	main()
