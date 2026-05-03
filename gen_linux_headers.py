@@ -169,7 +169,7 @@ Version: {version}
 Section: kernel
 Priority: optional
 Architecture: {arch}
-Maintainer: You <dxablack@gmail.com>
+Maintainer: DX4GREY <dxablack@gmail.com>
 Description: Minimal Linux kernel headers for external module building
 """
     (DEBIAN / "control").write_text(control_content)
