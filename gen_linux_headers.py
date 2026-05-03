@@ -3,123 +3,186 @@
 import os
 import shutil
 import argparse
+import subprocess
 from pathlib import Path
 
-patterns = ["*.c", "*.o", "*.cmd", "*.d", ".*.cmd"]
+# Pola file yang tidak diperlukan (akan dihapus)
+patterns = [
+    "*.c", "*.o", "*.cmd", "*.d", ".*.cmd",
+    "*.S", "*.s", "*.lds", "*.a", "*.ko", "*.mod", "*.mod.c",
+    "*.lst", ".*.o.cmd", ".*.mod.cmd", "*.o.d", "*.orig", "*.rej",
+    "*.tab.c", "*.lex.c", "*.output", "*.symtypes", "*.order"
+]
 
 def log(msg, debug):
-	if debug:
-		print(f"[DEBUG] {msg}")
+    if debug:
+        print(f"[DEBUG] {msg}")
 
-def clean_headers(path, patterns, debug):
-	for pattern in patterns:
-		for file in path.rglob(pattern):
-			try:
-				file.unlink()
-			except Exception as e:
-				log(f"Error delete {file}: {e}", debug)
+def prune_all(root, debug):
+    """Hapus semua file yang tidak diperlukan untuk build modul"""
+    for pattern in patterns:
+        for file in root.rglob(pattern):
+            if file.is_file():
+                try:
+                    file.unlink()
+                    log(f"Deleted {file}", debug)
+                except Exception as e:
+                    log(f"Error deleting {file}: {e}", debug)
+    # Hapus direktori kosong (dari bawah ke atas)
+    for d in sorted(root.rglob("*"), key=lambda p: str(p), reverse=True):
+        if d.is_dir() and not any(d.iterdir()):
+            try:
+                d.rmdir()
+                log(f"Removed empty directory {d}", debug)
+            except Exception as e:
+                log(f"Error removing {d}: {e}", debug)
+
+def safe_copy(src, dst, debug):
+    """Salin file atau direktori dengan aman"""
+    src_path = Path(src)
+    dst_path = Path(dst)
+    if not src_path.exists():
+        log(f"Source {src} does not exist, skipping...", debug)
+        return
+    if src_path.is_dir():
+        dst_path.mkdir(parents=True, exist_ok=True)
+        for item in src_path.iterdir():
+            target = dst_path / item.name
+            if item.is_dir():
+                safe_copy(item, target, debug)
+            else:
+                shutil.copy2(item, target)
+    else:
+        dst_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src_path, dst_path)
 
 def is_kernel_prepared(outputd=""):
-	must_exist = [
-		f"./{outputd}/include/generated/autoconf.h",
-		f"./{outputd}/include/config",
-		f"./{outputd}/scripts",
-	]
-	for item in must_exist:
-		if not Path(item).exists():
-			return False
-	return True
-	
-def safe_copy(src, dst, debug):
-	src_path = Path(src)
-	dst_path = Path(dst)
+    """Cek apakah kernel sudah dipersiapkan (make modules_prepare)"""
+    must_exist = [
+        f"./{outputd}/include/generated/autoconf.h",
+        f"./{outputd}/include/config",
+        f"./{outputd}/scripts",  # out/scripts mungkin ada, tapi kita tidak akan gunakan
+    ]
+    for item in must_exist:
+        if not Path(item).exists():
+            return False
+    return True
 
-	if not src_path.exists():
-		log(f"Source {src} does not exist, skipping...", debug)
-		return
+def copy_arch_selective(arch, src_root, out_root, dst_root, debug):
+    """
+    Salin hanya bagian minimal dari arsitektur:
+    - include/ (wajib)
+    - Makefile, Kconfig, Kbuild
+    - kernel/module.lds (jika ada)
+    - out/arch/... (hasil generate seperti asm-offsets.h)
+    """
+    src_arch = src_root / "arch" / arch
+    dst_arch = dst_root / "arch" / arch
+    if not src_arch.exists():
+        log(f"Arch {arch} not found in source, skipping", debug)
+        return
 
-	if src_path.is_dir():
-		dst_path.mkdir(parents=True, exist_ok=True)
-		for item in src_path.iterdir():
-			target = dst_path / item.name
-			if item.is_dir():
-				safe_copy(item, target, debug)
-			else:
-				shutil.copy2(item, target)
-	else:
-		dst_path.parent.mkdir(parents=True, exist_ok=True)
-		shutil.copy2(src_path, dst_path)
-		
+    dst_arch.mkdir(parents=True, exist_ok=True)
+
+    # File penting di root arch
+    for file in ["Makefile", "Kconfig", "Kbuild"]:
+        src_file = src_arch / file
+        if src_file.exists():
+            safe_copy(src_file, dst_arch / file, debug)
+
+    # Salin include/ dari arch (header spesifik arsitektur)
+    src_inc = src_arch / "include"
+    if src_inc.exists():
+        safe_copy(src_inc, dst_arch / "include", debug)
+
+    # Salin module.lds jika ada (biasanya di arch/*/kernel/)
+    lds = src_arch / "kernel" / "module.lds"
+    if lds.exists():
+        safe_copy(lds, dst_arch / "kernel" / "module.lds", debug)
+
+    # Salin hasil generate dari out/arch (misal asm-offsets.h)
+    out_arch = out_root / "arch" / arch
+    if out_arch.exists():
+        out_inc = out_arch / "include"
+        if out_inc.exists():
+            safe_copy(out_inc, dst_arch / "include", debug)
+        out_make = out_arch / "Makefile"
+        if out_make.exists():
+            safe_copy(out_make, dst_arch / "Makefile", debug)
+
 def setup_headers(debug, outk):
-	if not is_kernel_prepared(outk):
-		print("[ERROR] Kernel source is not prepared. Run 'make modules_prepare' first.")
-		return
-		
-	HLOC = Path("linux-headers")
-	ARCHES = ["arm64", "arm"]
+    """Mempersiapkan direktori linux-headers minimal untuk build modul eksternal"""
+    if not is_kernel_prepared(outk):
+        print("[ERROR] Kernel source is not prepared. Run 'make modules_prepare' first.")
+        return False
 
-	log(f"Creating {HLOC} directory structure...", debug)
-	(HLOC / "arch").mkdir(parents=True, exist_ok=True)
+    HLOC = Path("linux-headers")
+    out_dir = Path(outk)
+    src_root = Path(".")  # current directory sebagai source root
 
-	# Copy essential files
-	log("Copying include...", debug)
-	safe_copy("include", HLOC / "include", debug)
-	log("Copying scripts...", debug)
-	safe_copy("scripts", HLOC / "scripts", debug)
-	log("Copying Makefile...", debug)
-	safe_copy("Makefile", HLOC / "Makefile", debug)
+    log(f"Creating {HLOC} directory structure...", debug)
+    HLOC.mkdir(exist_ok=True)
 
-	# Handle Module.symvers
-	mod_sym = Path("Module.symvers")
-	target_sym = HLOC / "Module.symvers"
-	if mod_sym.exists():
-		log("Found Module.symvers, copying...", debug)
-		shutil.copy2(mod_sym, target_sym)
-	else:
-		log("Module.symvers not found, creating empty one...", debug)
-		target_sym.touch()
+    # 1. Salin file penting di level atas
+    top_files = ["Makefile", "Kconfig", "Kbuild", "Module.symvers"]
+    for fname in top_files:
+        src = src_root / fname
+        dst = HLOC / fname
+        if src.exists():
+            safe_copy(src, dst, debug)
+        elif fname == "Module.symvers":
+            # cari di out/ jika ada
+            out_sym = out_dir / "Module.symvers"
+            if out_sym.exists():
+                safe_copy(out_sym, dst, debug)
+            else:
+                dst.touch()
+                log("Created empty Module.symvers", debug)
 
-	# Copy arch
-	for arch in ARCHES:
-		src_arch = Path("arch") / arch
-		dst_arch = HLOC / "arch" / arch
-		safe_copy(src_arch, dst_arch, debug)
-		if arch == "arm64":
-			log(f"Creating symlink aarch64 -> {arch}", debug)
-			try:
-				os.symlink(arch, HLOC / "arch" / "aarch64")
-			except FileExistsError:
-				pass
+    # 2. Salin scripts dari source, PASTIKAN binary untuk HOST (bukan target)
+    #    Jalankan 'make scripts_basic' jika fixdep belum ada
+    scripts_src = src_root / "scripts"
+    fixdep_path = scripts_src / "basic" / "fixdep"
+    if not fixdep_path.exists():
+        log("fixdep not found, running 'make scripts_basic' to generate host binary...", debug)
+        subprocess.run(["make", "scripts_basic"], check=True, cwd=src_root)
+    # Salin seluruh scripts (termasuk basic/fixdep yang sudah host)
+    safe_copy(scripts_src, HLOC / "scripts", debug)
 
-	# Handle out directory
-	out_dir = Path("out")
-	if out_dir.exists():
-		log("Found out/ directory, copying additional includes and scripts...", debug)
-		log("Copying out include...", debug)
-		safe_copy(out_dir / "include", HLOC / "include", debug)
-		log("Copying out scripts...", debug)
-		safe_copy(out_dir / "scripts", HLOC / "scripts", debug)
-		for arch in ARCHES:
-			log(f"Copying out {arch}...", debug)
-			safe_copy(out_dir / "arch" / arch, HLOC / "arch" / arch, debug)
-	else:
-		log("No out/ directory found. Skipping.", debug)
-	
-	# Delete all .c files
-	log("Cleaning up junk files...", debug)
-	clean_headers(HLOC.resolve(), patterns, debug)
+    # 3. Salin include: prioritas dari out (generated headers)
+    if (out_dir / "include").exists():
+        safe_copy(out_dir / "include", HLOC / "include", debug)
+    else:
+        safe_copy(src_root / "include", HLOC / "include", debug)
+
+    # 4. Salin arch secara selektif
+    (HLOC / "arch").mkdir(exist_ok=True)
+    arches = ["arm64", "arm"]
+    for arch in arches:
+        copy_arch_selective(arch, src_root, out_dir, HLOC, debug)
+        if arch == "arm64":
+            # Buat symlink aarch64 -> arm64 untuk kompatibilitas
+            link = HLOC / "arch" / "aarch64"
+            if not link.exists():
+                try:
+                    link.symlink_to("arm64")
+                    log("Created symlink aarch64 -> arm64", debug)
+                except Exception as e:
+                    log(f"Failed to create symlink: {e}", debug)
+
+    # 5. Bersihkan file yang tidak diperlukan
+    log("Pruning unnecessary files...", debug)
+    prune_all(HLOC, debug)
+
+    log("Headers preparation completed.", debug)
+    return True
 
 def get_kernel_version(outk, debug):
+    """Mendapatkan versi kernel dari Makefile dan .config"""
     makefile = Path("Makefile")
     config = Path(outk) / ".config"
 
-    version = ""
-    patchlevel = ""
-    sublevel = ""
-    extraversion = ""
-    localversion = ""
-
-    # Parse Makefile
+    version = patchlevel = sublevel = extraversion = localversion = ""
     if makefile.exists():
         for line in makefile.read_text().splitlines():
             if line.startswith("VERSION ="):
@@ -130,19 +193,16 @@ def get_kernel_version(outk, debug):
                 sublevel = line.split("=")[1].strip()
             elif line.startswith("EXTRAVERSION ="):
                 extraversion = line.split("=")[1].strip()
-
-    # Parse .config
     if config.exists():
         for line in config.read_text().splitlines():
             if line.startswith("CONFIG_LOCALVERSION="):
                 localversion = line.split("=")[1].strip().strip('"')
-
     full_version = f"{version}.{patchlevel}.{sublevel}{extraversion}{localversion}"
-
     log(f"Detected kernel version: {full_version}", debug)
     return full_version
 
 def build_deb(debug, outk, arch="arm64"):
+    """Bangun paket DEB dari headers yang sudah disiapkan"""
     version = get_kernel_version(outk, debug)
     if shutil.which("dpkg-deb") is None:
         print("[ERROR] dpkg-deb is not available. Please install it to build the DEB package.")
@@ -163,7 +223,7 @@ def build_deb(debug, outk, arch="arm64"):
     log("Copying headers into package...", debug)
     shutil.copytree(HLOC, INSTALL_PATH, symlinks=True)
 
-    # --- control file (tidak berubah) ---
+    # File control
     control_content = f"""Package: linux-headers-{version}
 Version: {version}
 Section: kernel
@@ -171,10 +231,12 @@ Priority: optional
 Architecture: {arch}
 Maintainer: DX4GREY <dxablack@gmail.com>
 Description: Minimal Linux kernel headers for external module building
+ This package provides a minimal set of kernel headers optimized for size,
+ containing only files necessary to build external kernel modules.
 """
     (DEBIAN / "control").write_text(control_content)
 
-    # +++ Tambahan: skrip postinst untuk membuat symlink /lib/modules +++
+    # postinst script untuk membuat symlink /lib/modules
     postinst_content = f"""#!/bin/sh
 set -e
 mkdir -p /lib/modules/{version}
@@ -182,9 +244,9 @@ ln -sf /usr/src/linux-headers-{version} /lib/modules/{version}/build
 """
     postinst_path = DEBIAN / "postinst"
     postinst_path.write_text(postinst_content)
-    postinst_path.chmod(0o755)   # harus executable
+    postinst_path.chmod(0o755)
 
-    # Build deb
+    # Bangun .deb
     deb_name = f"linux-headers-{version}_{arch}.deb"
     log(f"Building {deb_name}...", debug)
     os.system(f"dpkg-deb --build {DEB_ROOT} {deb_name}")
@@ -192,16 +254,20 @@ ln -sf /usr/src/linux-headers-{version} /lib/modules/{version}/build
     print(f"[INFO] DEB package created: {deb_name}")
 
 def main():
-	parser = argparse.ArgumentParser(description="Prepare minimal kernel headers for external module building.")
-	parser.add_argument("--debug", action="store_true", help="Enable debug logging")
-	parser.add_argument("--outk", type=Path, default="out", help="Kernel out directory (default: out)")
-	parser.add_argument("--build-deb", action="store_true", help="Build a DEB package after preparing headers")
-	parser.add_argument("--arch", type=str, default="arm64", help="Target architecture")
-	args = parser.parse_args()
-	setup_headers(args.debug, args.outk)
-	if args.build_deb:
-		build_deb(args.debug, args.outk, args.arch)
-	log("All done!", args.debug)
+    parser = argparse.ArgumentParser(description="Prepare minimal kernel headers for external module building.")
+    parser.add_argument("--debug", action="store_true", help="Enable debug logging")
+    parser.add_argument("--outk", type=Path, default="out", help="Kernel out directory (default: out)")
+    parser.add_argument("--build-deb", action="store_true", help="Build a DEB package after preparing headers")
+    parser.add_argument("--arch", type=str, default="arm64", help="Target architecture for DEB package")
+    args = parser.parse_args()
+
+    if setup_headers(args.debug, args.outk):
+        if args.build_deb:
+            build_deb(args.debug, args.outk, args.arch)
+        log("All done!", args.debug)
+    else:
+        print("[ERROR] Header preparation failed. Exiting.")
+        exit(1)
 
 if __name__ == "__main__":
-	main()
+    main()
