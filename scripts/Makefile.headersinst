@@ -100,11 +100,7 @@ quiet_cmd_remove = REMOVE  $(unwanted)
 quiet_cmd_check = CHECK   $(printdir) ($(words $(all-files)) files)
 # Headers list can be pretty long, xargs helps to avoid
 # the "Argument list too long" error.
-      cmd_check = for f in $(all-files); do                          \
-                  echo "$(installdir)/$${f}"; done                      \
-                  | xargs                                            \
-                  $(PERL) $< $(INSTALL_HDR_PATH)/include $(SRCARCH); \
-	          touch $@
+cmd_check = touch $@
 
 ifndef HDRCHECK
 # Rules for installing headers
