@@ -29,6 +29,7 @@
 #include <linux/of_gpio.h>
 #include <linux/workqueue.h>
 #include <linux/slab.h>
+#include <linux/uaccess.h>   // untuk probe_kernel_read()
 #include <soc/qcom/subsystem_restart.h>
 #include <soc/qcom/ramdump.h>
 #include <soc/qcom/smem.h>
@@ -118,25 +119,32 @@ static DECLARE_WORK(clean_kobj_work, checknv_kobj_clean);
 
 static void log_modem_sfr(void)
 {
-	u32 size;
-	char *smem_reason;
+    u32 size;
+    char *smem_reason;
+    char buffer[MAX_SSR_REASON_LEN] = {0};  // buffer sementara
 
-	smem_reason = smem_get_entry_no_rlock(SMEM_SSR_REASON_MSS0, &size, 0,
-							SMEM_ANY_HOST_FLAG);
-	if (!smem_reason || !size) {
-		pr_err("modem subsystem failure reason: (unknown, smem_get_entry_no_rlock failed).\n");
-		strlcpy(last_modem_sfr_reason, "unknown", min(8u, MAX_SSR_REASON_LEN));
-		return;
-	}
-	if (!smem_reason[0]) {
-		pr_err("modem subsystem failure reason: (unknown, empty string found).\n");
-		strlcpy(last_modem_sfr_reason, "unknown", min(8u, MAX_SSR_REASON_LEN));
-		return;
-	}
+    smem_reason = smem_get_entry_no_rlock(SMEM_SSR_REASON_MSS0, &size, 0,
+                                          SMEM_ANY_HOST_FLAG);
+    if (!smem_reason || !size) {
+        pr_err("modem subsystem failure reason: (unknown, smem_get_entry_no_rlock failed).\n");
+        strlcpy(last_modem_sfr_reason, "unknown", min(8u, MAX_SSR_REASON_LEN));
+        return;
+    }
 
-	strlcpy(last_modem_sfr_reason, smem_reason, min(size, MAX_SSR_REASON_LEN));
-	pr_err("modem subsystem failure reason: %s.\n", last_modem_sfr_reason);
+    /*
+     * Gunakan probe_kernel_read untuk membaca string alasan dari SMEM.
+     * Ini mencegah kernel panic jika area SMEM sudah tidak valid
+     * saat modem crash fatal.
+     */
+    if (probe_kernel_read(buffer, smem_reason, min_t(u32, size, MAX_SSR_REASON_LEN - 1)) != 0) {
+        pr_err("modem subsystem failure reason: (unreadable, smem fault)\n");
+        strlcpy(last_modem_sfr_reason, "unknown", min(8u, MAX_SSR_REASON_LEN));
+        return;
+    }
 
+    buffer[MAX_SSR_REASON_LEN - 1] = '\0'; // pastikan terminasi null
+    strlcpy(last_modem_sfr_reason, buffer, MAX_SSR_REASON_LEN);
+    pr_err("modem subsystem failure reason: %s.\n", last_modem_sfr_reason);
 }
 
 static void restart_modem(struct modem_data *drv)
