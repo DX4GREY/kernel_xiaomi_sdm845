@@ -68,12 +68,12 @@ jobs:
       - name: Generate defconfig
         run: |
           export PATH="$GITHUB_WORKSPACE/toolchain/cosmic-clang/bin:$PATH"
-          make O=out ARCH=arm64 nethunter_defconfig
+          make O=out ARCH=arm64 LLVM=1 nethunter_defconfig
 
       - name: Build kernel dan hasilkan .deb
         run: |
           export PATH="$GITHUB_WORKSPACE/toolchain/cosmic-clang/bin:$PATH"
-          make O=out ARCH=arm64 -j$(nproc) bindeb-pkg
+          make O=out ARCH=arm64 LLVM=1 -j$(nproc) bindeb-pkg
 
       - name: Kumpulkan file .deb
         run: |
