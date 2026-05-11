@@ -5,6 +5,7 @@ import shutil
 import argparse
 import subprocess
 from pathlib import Path
+import sys
 
 # Pola file yang tidak diperlukan (akan dihapus)
 patterns = [
@@ -65,6 +66,7 @@ def is_kernel_prepared(outputd=""):
     ]
     for item in must_exist:
         if not Path(item).exists():
+            print(f"[ERROR] Missing required file: {item}")
             return False
     return True
 
@@ -110,14 +112,25 @@ def copy_arch_selective(arch, src_root, out_root, dst_root, debug):
         if out_make.exists():
             safe_copy(out_make, dst_arch / "Makefile", debug)
 
-def setup_headers(debug, outk):
+def build_scripts_basic_for_arch(arch, src_root, out_dir, debug):
+    """Bangun scripts_basic untuk arsitektur tertentu."""
+    log(f"Building scripts_basic for architecture: {arch}...", debug)
+    try:
+        subprocess.run(["make", f"ARCH={arch}", f"O={out_dir}", "scripts_basic"], check=True, cwd=src_root)
+        log(f"Successfully built scripts_basic for {arch}", debug)
+    except subprocess.CalledProcessError as e:
+        log(f"Failed to build scripts_basic for {arch}: {e}", debug)
+        return False
+    return True
+
+def setup_headers(debug, outk, arches):
     """Mempersiapkan direktori linux-headers minimal untuk build modul eksternal"""
     if not is_kernel_prepared(outk):
         print("[ERROR] Kernel source is not prepared. Run 'make modules_prepare' first.")
         return False
 
     HLOC = Path("linux-headers")
-    out_dir = Path(outk)
+    out_dir = Path(outk)  # Use the --outk argument for output directory
     src_root = Path(".")  # current directory sebagai source root
 
     log(f"Creating {HLOC} directory structure...", debug)
@@ -140,12 +153,18 @@ def setup_headers(debug, outk):
                 log("Created empty Module.symvers", debug)
 
     # 2. Salin scripts dari source, PASTIKAN binary untuk HOST (bukan target)
-    #    Jalankan 'make scripts_basic' jika fixdep belum ada
+    # Jalankan 'make scripts_basic' untuk setiap arsitektur yang dipilih
     scripts_src = src_root / "scripts"
-    fixdep_path = scripts_src / "basic" / "fixdep"
+    for arch in arches:
+        if not build_scripts_basic_for_arch(arch, src_root, out_dir, debug):
+            print(f"[WARNING] Skipping further steps for architecture: {arch}")
+            continue
+
+    fixdep_path = Path(out_dir) / "scripts" / "basic" / "fixdep"
     if not fixdep_path.exists():
-        log("fixdep not found, running 'make scripts_basic' to generate host binary...", debug)
-        subprocess.run(["make", "scripts_basic"], check=True, cwd=src_root)
+        log("fixdep not found after building scripts_basic. Exiting...", debug)
+        sys.exit(1)
+
     # Salin seluruh scripts (termasuk basic/fixdep yang sudah host)
     safe_copy(scripts_src, HLOC / "scripts", debug)
 
@@ -157,7 +176,6 @@ def setup_headers(debug, outk):
 
     # 4. Salin arch secara selektif
     (HLOC / "arch").mkdir(exist_ok=True)
-    arches = ["arm64", "arm"]
     for arch in arches:
         copy_arch_selective(arch, src_root, out_dir, HLOC, debug)
         if arch == "arm64":
@@ -174,7 +192,29 @@ def setup_headers(debug, outk):
     log("Pruning unnecessary files...", debug)
     prune_all(HLOC, debug)
 
+    # Validasi akhir
+    if not validate_headers(HLOC, debug):
+        print("[ERROR] Validation failed. linux-headers is incomplete.")
+        return False
+
     log("Headers preparation completed.", debug)
+    return True
+
+def validate_headers(HLOC, debug):
+    """Validasi bahwa semua file penting ada di linux-headers."""
+    required_files = [
+        HLOC / "Makefile",
+        HLOC / "Kconfig",
+        HLOC / "Kbuild",
+        HLOC / "Module.symvers",
+        HLOC / "include",
+        HLOC / "arch",
+    ]
+    missing_files = [str(f) for f in required_files if not f.exists()]
+    if missing_files:
+        log(f"[ERROR] Missing required files: {', '.join(missing_files)}", debug)
+        return False
+    log("[INFO] All required files are present in linux-headers.", debug)
     return True
 
 def get_kernel_version(outk, debug):
@@ -253,17 +293,39 @@ ln -sf /usr/src/linux-headers-{version} /lib/modules/{version}/build
 
     print(f"[INFO] DEB package created: {deb_name}")
 
+def get_available_architectures(src_root):
+    """Dapatkan daftar arsitektur yang tersedia dari direktori arch."""
+    arch_dir = src_root / "arch"
+    if not arch_dir.exists():
+        print("[ERROR] Directory 'arch/' not found.")
+        sys.exit(1)
+    return [d.name for d in arch_dir.iterdir() if d.is_dir()]
+
 def main():
     parser = argparse.ArgumentParser(description="Prepare minimal kernel headers for external module building.")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     parser.add_argument("--outk", type=Path, default="out", help="Kernel out directory (default: out)")
     parser.add_argument("--build-deb", action="store_true", help="Build a DEB package after preparing headers")
-    parser.add_argument("--arch", type=str, default="arm64", help="Target architecture for DEB package")
+    parser.add_argument("--arch", type=str, help="Target architecture for DEB package")
     args = parser.parse_args()
 
-    if setup_headers(args.debug, args.outk):
+    src_root = Path(".")
+    available_arches = get_available_architectures(src_root)
+
+    if args.arch:
+        if args.arch not in available_arches:
+            print(f"[ERROR] Invalid architecture '{args.arch}'. Available options: {', '.join(available_arches)}")
+            sys.exit(1)
+        arches = [args.arch]
+    else:
+        print("[INFO] No architecture specified. Defaulting to all available architectures.")
+        arches = available_arches
+
+    log(f"Processing architectures: {', '.join(arches)}", args.debug)
+
+    if setup_headers(args.debug, args.outk, arches):
         if args.build_deb:
-            build_deb(args.debug, args.outk, args.arch)
+            build_deb(args.debug, args.outk, args.arch or "arm64")
         log("All done!", args.debug)
     else:
         print("[ERROR] Header preparation failed. Exiting.")

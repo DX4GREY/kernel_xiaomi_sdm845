@@ -135,3 +135,7 @@ kali-nethunter-kernel-builder
 linux-headers/*
 deb_pkg/*
 linux-headers-*.deb
+linux-4.9.337-sandstorm_4.9.337-sandstorm-1_arm64.changes
+linux-image-4.9.337-sandstorm_4.9.337-sandstorm-1_arm64.deb
+linux-image-4.9.337-sandstorm-dbg_4.9.337-sandstorm-1_arm64.deb
+linux-libc-dev_4.9.337-sandstorm-1_arm64.deb
