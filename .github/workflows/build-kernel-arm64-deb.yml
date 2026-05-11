@@ -2,9 +2,9 @@ name: Build ARM64 Kernel .deb with Cosmic Clang
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: [ "fourteen", "fifteen" ]
   pull_request:
-    branches: [ "main", "master" ]
+    branches: [ "fourteen", "fifteen" ]
   workflow_dispatch:    # Trigger manual
 
 env:
