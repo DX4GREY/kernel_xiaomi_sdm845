@@ -1,24 +1,15 @@
-name: Build ARM64 Kernel .deb with Cosmic Clang
+name: Build ARM64 Kernel .deb (Native Clang)
 
 on:
   push:
-    branches: [ "fourteen", "fifteen" ]
+    branches: [ "**" ]
   pull_request:
-    branches: [ "fourteen", "fifteen" ]
-  workflow_dispatch:    # Trigger manual
-
-env:
-  # URL repo toolchain Cosmic Clang (SESUAIKAN)
-  TOOLCHAIN_REPO: "https://gitlab.com/DX4GREY/cosmic-clang.git"
-  TOOLCHAIN_BRANCH: "main"
-  # Direktori toolchain di dalam runner
-  TOOLCHAIN_DIR: "${{ github.workspace }}/toolchain/cosmic-clang"
+    branches: [ "**" ]
+  workflow_dispatch:
 
 jobs:
   build-deb:
-    # Gunakan runner ARM64 GitHub (jika tersedia di plan Anda)
-    # atau ganti dengan label self-hosted ARM64, misal: [self-hosted, ARM64]
-    runs-on: ubuntu-22.04-arm
+    runs-on: ubuntu-22.04-arm   # GitHub-hosted ARM64 runner
     timeout-minutes: 180
 
     steps:
@@ -28,60 +19,35 @@ jobs:
           submodules: true
           fetch-depth: 0
 
-      - name: Cache toolchain
-        id: cache-toolchain
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.TOOLCHAIN_DIR }}
-          key: cosmic-clang-${{ env.TOOLCHAIN_BRANCH }}-${{ hashFiles('.github/workflows/*') }}
-          restore-keys: |
-            cosmic-clang-${{ env.TOOLCHAIN_BRANCH }}-
-
-      - name: Clone toolchain (bila belum ada di cache)
-        if: steps.cache-toolchain.outputs.cache-hit != 'true'
-        run: |
-          git clone --depth 1 --single-branch --branch "$TOOLCHAIN_BRANCH" \
-            "$TOOLCHAIN_REPO" "$TOOLCHAIN_DIR"
-
-      - name: Install dependencies
+      - name: Install dependencies & native toolchain
         run: |
           sudo apt-get update
           sudo apt-get install -y flex bison bc libssl-dev ccache rsync \
-            libelf-dev libncurses-dev dpkg-dev debhelper
+            libelf-dev libncurses-dev dpkg-dev debhelper \
+            clang lld gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
 
       - name: Setup build environment
         run: |
-          # Sesuaikan path TOOLCHAIN_DIR di setup.sh
-          sed -i "s|TOOLCHAIN_DIR=.*|TOOLCHAIN_DIR=\"${TOOLCHAIN_DIR}\"|" setup.sh
-          source setup.sh
-          # Ekspor seluruh variabel ke GitHub environment
-          echo "PATH=${PATH}" >> $GITHUB_ENV
-          echo "CROSS_COMPILE=${CROSS_COMPILE}" >> $GITHUB_ENV
-          echo "CROSS_COMPILE_COMPAT=${CROSS_COMPILE_COMPAT}" >> $GITHUB_ENV
-          echo "CROSS_COMPILE_ARM32=${CROSS_COMPILE_ARM32}" >> $GITHUB_ENV
-          echo "CLANG_TRIPLE=${CLANG_TRIPLE}" >> $GITHUB_ENV
-          echo "CC=${CC}" >> $GITHUB_ENV
-          echo "HOSTCC=${HOSTCC}" >> $GITHUB_ENV
-          echo "ARCH=${ARCH}" >> $GITHUB_ENV
-          echo "KBUILD_BUILD_USER=${KBUILD_BUILD_USER}" >> $GITHUB_ENV
-          echo "KBUILD_BUILD_HOST=${KBUILD_BUILD_HOST}" >> $GITHUB_ENV
+          echo "PATH=/usr/bin:${PATH}" >> $GITHUB_ENV
+          echo "CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
+          echo "CROSS_COMPILE_COMPAT=arm-linux-gnueabi-" >> $GITHUB_ENV
+          echo "CROSS_COMPILE_ARM32=arm-linux-gnueabi-" >> $GITHUB_ENV
+          echo "CLANG_TRIPLE=aarch64-linux-gnu-" >> $GITHUB_ENV
+          echo "CC=clang" >> $GITHUB_ENV
+          echo "HOSTCC=clang" >> $GITHUB_ENV
+          echo "ARCH=arm64" >> $GITHUB_ENV
+          echo "KBUILD_BUILD_USER=builder" >> $GITHUB_ENV
+          echo "KBUILD_BUILD_HOST=dlovely-faz" >> $GITHUB_ENV
 
-      - name: Build kernel and generate .deb packages
+      - name: Build kernel and generate .deb
         run: |
-          # Pastikan toolchain ada di PATH
-          export PATH="${TOOLCHAIN_DIR}/bin:${PATH}"
-          # Konfigurasi kernel
           make O=out ARCH=arm64 nethunter_defconfig
-          # Build kernel + bikin paket .deb (image, headers, libc-dev)
-          # bindeb-pkg akan meletakkan .deb di direktori induk (../)
           make O=out ARCH=arm64 -j$(nproc) bindeb-pkg
 
-      - name: Collect and list .deb files
+      - name: Collect .deb packages
         run: |
           mkdir -p artifacts
-          # Pindahkan semua .deb yang dihasilkan ke folder artifacts
           find . -maxdepth 2 -name "*.deb" -exec mv {} artifacts/ \;
-          echo "Package list:"
           ls -lh artifacts/
 
       - name: Upload .deb artifacts
