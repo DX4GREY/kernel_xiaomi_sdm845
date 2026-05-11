@@ -75,6 +75,60 @@ jobs:
           export PATH="$GITHUB_WORKSPACE/toolchain/cosmic-clang/bin:$PATH"
           make O=out ARCH=arm64 LLVM=1 -j$(nproc) bindeb-pkg
 
+      - name: Prepare AnyKernel3
+        run: |
+          git clone --depth=1 https://github.com/DX4GREY/sandstorm.git AnyKernel
+
+          KERNEL_IMAGE=$(find out/arch/arm64/boot -name "Image.gz*" | head -n 1)
+
+          if [ -z "$KERNEL_IMAGE" ]; then
+            echo "Kernel image tidak ditemukan!"
+            exit 1
+          fi
+
+          cp "$KERNEL_IMAGE" AnyKernel/
+          
+          sed -i 's/kernel.version=.*/kernel.version=4.9.337/' anykernel.sh
+          sed -i 's/device.name1=.*/device.name1=beryllium/' anykernel.sh
+          sed -i 's/kernel.compiler=.*/kernel.compiler=Cosmic Clang/' anykernel.sh
+
+          AK3_ZIP="AnyKernel-$(date +%Y%m%d-%H%M).zip"
+
+          zip -r9 "../$AK3_ZIP" * \
+            -x .git README.md '*placeholder'
+
+          echo "AK3_ZIP=$AK3_ZIP" >> $GITHUB_ENV
+
+      - name: Pack kernel modules
+        run: |
+          mkdir -p modules_pack/lib/modules
+
+          find out -type f -name "*.ko" \
+            -exec cp {} modules_pack/lib/modules/ \;
+
+          MODULE_COUNT=$(find modules_pack -name "*.ko" | wc -l)
+
+          echo "Modules ditemukan: $MODULE_COUNT"
+
+          if [ "$MODULE_COUNT" -eq 0 ]; then
+            echo "Tidak ada module, skip"
+            exit 0
+          fi
+
+          # Strip modules
+          if command -v llvm-strip >/dev/null 2>&1; then
+            find modules_pack -name "*.ko" \
+              -exec llvm-strip --strip-unneeded {} \;
+          fi
+
+          MODULES_ZIP="modules-$(date +%Y%m%d-%H%M).zip"
+
+          cd modules_pack
+
+          zip -r9 "../$MODULES_ZIP" *
+
+          echo "MODULES_ZIP=$MODULES_ZIP" >> $GITHUB_ENV
+
       - name: Kumpulkan file .deb
         run: |
           mkdir -p artifacts
@@ -84,6 +138,8 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: kernel-deb-cosmic
-          path: artifacts/*.deb
+          name: kernel-builds
+          path: |
+            artifacts/*.deb
+            *.zip
           if-no-files-found: error
