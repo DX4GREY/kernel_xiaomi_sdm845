@@ -1,4 +1,4 @@
-name: Build ARM64 Kernel .deb (Native Clang)
+name: Build ARM64 Kernel .deb with Cosmic Clang
 
 on:
   push:
@@ -9,7 +9,7 @@ on:
 
 jobs:
   build-deb:
-    runs-on: ubuntu-22.04-arm   # GitHub-hosted ARM64 runner
+    runs-on: ubuntu-latest
     timeout-minutes: 180
 
     steps:
@@ -19,40 +19,71 @@ jobs:
           submodules: true
           fetch-depth: 0
 
-      - name: Install dependencies & native toolchain
+      - name: Cache toolchain
+        id: cache-toolchain
+        uses: actions/cache@v4
+        with:
+          path: toolchain/cosmic-clang
+          key: cosmic-clang-v1-${{ hashFiles('.github/workflows/*') }}
+          restore-keys: |
+            cosmic-clang-v1-
+
+      - name: Clone Cosmic Clang (jika belum ada di cache)
+        if: steps.cache-toolchain.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 "https://gitlab.com/DX4GREY/cosmic-clang.git" \
+            toolchain/cosmic-clang
+
+      - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y flex bison bc libssl-dev ccache rsync \
-            libelf-dev libncurses-dev dpkg-dev debhelper \
-            clang lld gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
+            libelf-dev libncurses-dev dpkg-dev debhelper
 
       - name: Setup build environment
         run: |
-          echo "PATH=/usr/bin:${PATH}" >> $GITHUB_ENV
-          echo "CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
-          echo "CROSS_COMPILE_COMPAT=arm-linux-gnueabi-" >> $GITHUB_ENV
-          echo "CROSS_COMPILE_ARM32=arm-linux-gnueabi-" >> $GITHUB_ENV
-          echo "CLANG_TRIPLE=aarch64-linux-gnu-" >> $GITHUB_ENV
-          echo "CC=clang" >> $GITHUB_ENV
-          echo "HOSTCC=clang" >> $GITHUB_ENV
-          echo "ARCH=arm64" >> $GITHUB_ENV
-          echo "KBUILD_BUILD_USER=builder" >> $GITHUB_ENV
-          echo "KBUILD_BUILD_HOST=dlovely-faz" >> $GITHUB_ENV
+          TOOLCHAIN_DIR="$GITHUB_WORKSPACE/toolchain/cosmic-clang"
+          export PATH="$TOOLCHAIN_DIR/bin:$PATH"
+          export KBUILD_BUILD_USER=builder
+          export KBUILD_BUILD_HOST=dlovely-faz
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
+          export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          export CC=clang
+          export HOSTCC=clang
+          export ARCH=arm64
 
-      - name: Build kernel and generate .deb
+          echo "PATH=$PATH" >> $GITHUB_ENV
+          echo "CROSS_COMPILE=$CROSS_COMPILE" >> $GITHUB_ENV
+          echo "CROSS_COMPILE_COMPAT=$CROSS_COMPILE_COMPAT" >> $GITHUB_ENV
+          echo "CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32" >> $GITHUB_ENV
+          echo "CLANG_TRIPLE=$CLANG_TRIPLE" >> $GITHUB_ENV
+          echo "CC=$CC" >> $GITHUB_ENV
+          echo "HOSTCC=$HOSTCC" >> $GITHUB_ENV
+          echo "ARCH=$ARCH" >> $GITHUB_ENV
+          echo "KBUILD_BUILD_USER=$KBUILD_BUILD_USER" >> $GITHUB_ENV
+          echo "KBUILD_BUILD_HOST=$KBUILD_BUILD_HOST" >> $GITHUB_ENV
+
+      - name: Generate defconfig
         run: |
+          export PATH="$GITHUB_WORKSPACE/toolchain/cosmic-clang/bin:$PATH"
           make O=out ARCH=arm64 nethunter_defconfig
+
+      - name: Build kernel dan hasilkan .deb
+        run: |
+          export PATH="$GITHUB_WORKSPACE/toolchain/cosmic-clang/bin:$PATH"
           make O=out ARCH=arm64 -j$(nproc) bindeb-pkg
 
-      - name: Collect .deb packages
+      - name: Kumpulkan file .deb
         run: |
           mkdir -p artifacts
           find . -maxdepth 2 -name "*.deb" -exec mv {} artifacts/ \;
           ls -lh artifacts/
 
-      - name: Upload .deb artifacts
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: kernel-deb-arm64
+          name: kernel-deb-cosmic
           path: artifacts/*.deb
           if-no-files-found: error
