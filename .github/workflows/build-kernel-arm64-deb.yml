@@ -2,9 +2,9 @@ name: Build ARM64 Kernel .deb with Cosmic Clang
 
 on:
   push:
-    branches: [ "**" ]
+    branches: [ "fourteen" ]
   pull_request:
-    branches: [ "**" ]
+    branches: [ "fourteen" ]
   workflow_dispatch:
 
 jobs:
@@ -31,8 +31,11 @@ jobs:
       - name: Clone Cosmic Clang (jika belum ada di cache)
         if: steps.cache-toolchain.outputs.cache-hit != 'true'
         run: |
-          git clone --depth 1 "https://gitlab.com/DX4GREY/cosmic-clang.git" \
-            toolchain/cosmic-clang
+          if [ ! -d "toolchain/cosmic-clang" ]; then
+              git clone --depth 1 "https://gitlab.com/DX4GREY/cosmic-clang.git" toolchain/cosmic-clang
+          else
+            echo "Toolchain ditemukan di cache, lewati cloning."
+          fi
 
       - name: Install dependencies
         run: |
