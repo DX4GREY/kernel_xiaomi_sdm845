@@ -82,7 +82,7 @@ jobs:
         run: |
           git clone --depth=1 https://github.com/DX4GREY/sandstorm.git AnyKernel
 
-          KERNEL_IMAGE=$(find out/arch/arm64/boot -name "Image.gz*" | head -n 1)
+          KERNEL_IMAGE="out/arch/arm64/boot/Image.gz-dtb
 
           if [ -z "$KERNEL_IMAGE" ]; then
             echo "Kernel image tidak ditemukan!"
