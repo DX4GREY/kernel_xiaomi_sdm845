@@ -91,9 +91,9 @@ jobs:
 
           cp "$KERNEL_IMAGE" AnyKernel/
           
-          sed -i 's/kernel.version=.*/kernel.version=4.9.337/' anykernel.sh
-          sed -i 's/device.name1=.*/device.name1=beryllium/' anykernel.sh
-          sed -i 's/kernel.compiler=.*/kernel.compiler=Cosmic Clang/' anykernel.sh
+          sed -i 's/kernel.version=.*/kernel.version=4.9.337/' AnyKernel/anykernel.sh
+          sed -i 's/device.name1=.*/device.name1=beryllium/' AnyKernel/anykernel.sh
+          sed -i 's/kernel.compiler=.*/kernel.compiler=Cosmic Clang/' AnyKernel/anykernel.sh
 
           AK3_ZIP="AnyKernel-$(date +%Y%m%d-%H%M).zip"
 
