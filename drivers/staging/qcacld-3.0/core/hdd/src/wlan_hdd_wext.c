@@ -10220,10 +10220,12 @@ static const struct iw_priv_args we_private_args[] = {
  */
 static int hdd_wext_giwfreq(struct net_device *dev,
 			    struct iw_request_info *info,
-			    struct iw_freq *freq, char *extra)
+			    union iwreq_data *wrqu,
+			    char *extra)
 {
 	struct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(dev);
 	struct hdd_station_ctx *sta_ctx;
+	struct iw_freq *freq = &wrqu->freq;
 	uint32_t chan_freq;
 
 	if (!adapter)
@@ -10252,7 +10254,7 @@ static int hdd_wext_giwfreq(struct net_device *dev,
  * layer from ever being reached, causing "channel -1".
  */
 static const iw_handler we_standard[] = {
-	[IW_IOCTL_IDX(SIOCGIWFREQ)] = (iw_handler)hdd_wext_giwfreq,
+	[IW_IOCTL_IDX(SIOCGIWFREQ)] = hdd_wext_giwfreq,
 };
 
 const struct iw_handler_def we_handler_def = {
