@@ -79,7 +79,7 @@ jobs:
           make O=out ARCH=arm64 LLVM=1 -j$(nproc)
 
       - name: Upload Kernel Image.gz-dtb
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: kernel-image
           path: out/arch/arm64/boot/Image.gz-dtb
@@ -91,7 +91,7 @@ jobs:
           find out -name "*.ko" -print0 | xargs -0 -I{} bash -c 'mkdir -p "modules/$(dirname {})"; cp -a "{}" "modules/{}"'
 
       - name: Upload kernel modules
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: kernel-modules
           path: modules/
