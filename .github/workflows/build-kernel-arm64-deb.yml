@@ -1,4 +1,4 @@
-name: Build ARM64 Kernel .deb with Cosmic Clang
+name: Build ARM64 Kernel with Cosmic Clang
 
 on:
   push:
@@ -73,76 +73,25 @@ jobs:
           export PATH="$GITHUB_WORKSPACE/toolchain/cosmic-clang/bin:$PATH"
           make O=out ARCH=arm64 LLVM=1 nethunter_defconfig
 
-      - name: Build kernel dan hasilkan .deb
+      - name: Build kernel
         run: |
           export PATH="$GITHUB_WORKSPACE/toolchain/cosmic-clang/bin:$PATH"
-          make O=out ARCH=arm64 LLVM=1 -j$(nproc) bindeb-pkg
+          make O=out ARCH=arm64 LLVM=1 -j$(nproc)
 
-      - name: Prepare AnyKernel3
-        run: |
-          git clone --depth=1 https://github.com/DX4GREY/sandstorm.git AnyKernel
-
-          KERNEL_IMAGE="out/arch/arm64/boot/Image.gz-dtb"
-
-          if [ -z "$KERNEL_IMAGE" ]; then
-            echo "Kernel image tidak ditemukan!"
-            exit 1
-          fi
-
-          cp "$KERNEL_IMAGE" AnyKernel/
-          
-          sed -i 's/kernel.version=.*/kernel.version=4.9.337/' AnyKernel/anykernel.sh
-          sed -i 's/device.name1=.*/device.name1=beryllium/' AnyKernel/anykernel.sh
-          sed -i 's/kernel.compiler=.*/kernel.compiler=Cosmic Clang/' AnyKernel/anykernel.sh
-
-          AK3_ZIP="AnyKernel-$(date +%Y%m%d-%H%M).zip"
-
-          zip -r9 "../$AK3_ZIP" * \
-            -x .git README.md '*placeholder'
-
-          echo "AK3_ZIP=$AK3_ZIP" >> $GITHUB_ENV
-
-      - name: Pack kernel modules
-        run: |
-          mkdir -p modules_pack/lib/modules
-
-          find out -type f -name "*.ko" \
-            -exec cp {} modules_pack/lib/modules/ \;
-
-          MODULE_COUNT=$(find modules_pack -name "*.ko" | wc -l)
-
-          echo "Modules ditemukan: $MODULE_COUNT"
-
-          if [ "$MODULE_COUNT" -eq 0 ]; then
-            echo "Tidak ada module, skip"
-            exit 0
-          fi
-
-          # Strip modules
-          if command -v llvm-strip >/dev/null 2>&1; then
-            find modules_pack -name "*.ko" \
-              -exec llvm-strip --strip-unneeded {} \;
-          fi
-
-          MODULES_ZIP="modules-$(date +%Y%m%d-%H%M).zip"
-
-          cd modules_pack
-
-          zip -r9 "../$MODULES_ZIP" *
-
-          echo "MODULES_ZIP=$MODULES_ZIP" >> $GITHUB_ENV
-
-      - name: Kumpulkan file .deb
-        run: |
-          mkdir -p artifacts
-          find . -maxdepth 2 -name "*.deb" -exec mv {} artifacts/ \;
-          ls -lh artifacts/
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - name: Upload Kernel Image.gz-dtb
+        uses: actions/upload-artifact@v3
         with:
-          name: kernel-builds
-          path: |
-            artifacts/*.deb
-            *.zip
-          if-no-files-found: error
+          name: kernel-image
+          path: out/arch/arm64/boot/Image.gz-dtb
+      
+      - name: Collect kernel modules
+        run: |
+          # collect all .ko files preserving directory structure
+          mkdir -p modules
+          find out -name "*.ko" -print0 | xargs -0 -I{} bash -c 'mkdir -p "modules/$(dirname {})"; cp -a "{}" "modules/{}"'
+
+      - name: Upload kernel modules
+        uses: actions/upload-artifact@v3
+        with:
+          name: kernel-modules
+          path: modules/
