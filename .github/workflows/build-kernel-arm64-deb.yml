@@ -41,7 +41,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y flex bison bc libssl-dev ccache rsync \
-            libelf-dev libncurses-dev dpkg-dev debhelper
+            libelf-dev libncurses-dev dpkg-dev debhelper zip
 
       - name: Setup build environment
         run: |
@@ -83,6 +83,64 @@ jobs:
         with:
           name: kernel-image
           path: out/arch/arm64/boot/Image.gz-dtb
+
+      - name: Create AnyKernel3 zip for beryllium
+        run: |
+          if [ ! -f "out/arch/arm64/boot/Image.gz-dtb" ]; then
+            echo "Image.gz-dtb tidak ditemukan!"
+            exit 1
+          fi
+
+          AK3_DIR="AnyKernel3-beryllium"
+          ZIP_NAME="AnyKernel3-beryllium-${GITHUB_RUN_NUMBER}.zip"
+
+          rm -rf "$AK3_DIR" "$ZIP_NAME"
+          rsync -a --exclude=".git" kali-nethunter-kernel-builder/anykernel3/ "$AK3_DIR/"
+          cp out/arch/arm64/boot/Image.gz-dtb "$AK3_DIR/Image.gz-dtb"
+
+          cat > "$AK3_DIR/anykernel.sh" <<'EOF'
+          # AnyKernel3 Ramdisk Mod Script
+          # osm0sis @ xda-developers
+
+          ## AnyKernel setup
+          # begin properties
+          properties() { '
+          kernel.string=NetHunter Kernel for Xiaomi Poco F1
+          do.devicecheck=1
+          do.modules=0
+          do.systemless=0
+          do.cleanup=1
+          do.cleanuponabort=0
+          device.name1=beryllium
+          device.name2=POCO F1
+          device.name3=Poco F1
+          device.name4=Xiaomi Poco F1
+          supported.versions=
+          supported.patchlevels=
+          '; } # end properties
+
+          # shell variables
+          block=/dev/block/bootdevice/by-name/boot;
+          is_slot_device=0;
+          ramdisk_compression=auto;
+
+          ## AnyKernel methods (DO NOT CHANGE)
+          . tools/ak3-core.sh;
+
+          ## AnyKernel install
+          dump_boot;
+          write_boot;
+          ## end install
+          EOF
+
+          cd "$AK3_DIR"
+          zip -r9 "../$ZIP_NAME" . -x "*.git*" "README.md" "*.zip"
+
+      - name: Upload AnyKernel3 beryllium zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: anykernel3-beryllium
+          path: AnyKernel3-beryllium-*.zip
       
       - name: Collect kernel modules
         run: |
